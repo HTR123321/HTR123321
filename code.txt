@@ -1,0 +1,189 @@
+IntegrateData <- readRDS(file="/home/lab401_public/HTR/SD/IntegrateData.rds")
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(ggplot2)
+# Load the MF、IF、Mφ dataset
+# Load theIF
+IF.data<- Read10X(data.dir = "/home/lab401_public/HTR/SD/outs_EB/filtered_feature_bc_matrix")
+colnames(IF.data) <- paste('IF.data', colnames(IF.data), sep = '_')
+IF.data <- CreateSeuratObject(counts = IF.data, project = "IF.data", min.cells = 3, min.features = 200)
+IF.data[["percent.mt"]]<-PercentageFeatureSet(IF.data,pattern = "^mt-")
+VlnPlot(IF.data, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
+# FeatureScatter is typically used to visualize feature-feature relationships, but can be used
+# for anything calculated by the object, i.e. columns in object metadata, PC scores etc.
+plot1 <- FeatureScatter(IF.data, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(IF.data, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+#过滤
+IF.data<-subset(IF.data,subset=nFeature_RNA>3500&nFeature_RNA<6500&nCount_RNA<40000&percent.mt<5)
+IF.data
+
+# Load the MF
+MF.data<- Read10X(data.dir = "/home/lab401_public/HTR/SD/outs_SDSC/filtered_feature_bc_matrix")
+colnames(MF.data) <- paste('MF.data', colnames(MF.data), sep = '_')
+MF.data <- CreateSeuratObject(counts = MF.data, project = "MF.data", min.cells = 3, min.features = 200)
+MF.data[["percent.mt"]]<-PercentageFeatureSet(MF.data,pattern = "^mt-")
+VlnPlot(MF.data, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
+# FeatureScatter is typically used to visualize feature-feature relationships, but can be used
+# for anything calculated by the object, i.e. columns in object metadata, PC scores etc.
+plot1 <- FeatureScatter(MF.data, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(MF.data, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+MF.data <- subset(MF.data, subset = nFeature_RNA > 3500 & nFeature_RNA <6500 & nCount_RNA < 40000 & percent.mt < 5 )
+# Load the Mφ
+Mφ.data<- Read10X(data.dir = "/home/lab401_public/HTR/SD/outs_PGC/filtered_feature_bc_matrix")
+colnames(Mφ.data) <- paste('Mφ.data', colnames(Mφ.data), sep = '_')
+Mφ.data <- CreateSeuratObject(counts = Mφ.data, project = "Mφ.data", min.cells = 3, min.features = 200)
+Mφ.data[["percent.mt"]]<-PercentageFeatureSet(Mφ.data,pattern = "^mt-")
+VlnPlot(Mφ.data, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0)
+# FeatureScatter is typically used to visualize feature-feature relationships, but can be used
+# for anything calculated by the object, i.e. columns in object metadata, PC scores etc.
+plot1 <- FeatureScatter(Mφ.data, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(Mφ.data, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+Mφ.data <- subset(Mφ.data, subset = nFeature_RNA > 200 & nFeature_RNA <7000 & nCount_RNA < 70000 & percent.mt < 15 )
+Mφ.data
+
+
+
+
+
+## 构建seurat对象，并绘制小提琴图
+data.list <- list(IF.data,MF.data,Mφ.data)
+list.name <- c("IF.data","MF.data","Mφ.data")
+for(i in 1:length(data.list)){
+  data.list[[i]] <- NormalizeData(data.list[[i]], normalization.method = "LogNormalize", scale.factor = 10000)
+  data.list[[i]] <- FindVariableFeatures(data.list[[i]], selection.method = "vst", nfeatures = 2000) 
+  data.list[[i]]$group<-list.name[i]
+} 
+anchor <- FindIntegrationAnchors(object.list = data.list, dims = 1:30,anchor.features = 2000)  
+IntegrateData <- IntegrateData(anchorset = anchor, dims = 1:30)
+
+IntegrateData <- ScaleData(IntegrateData, verbose = FALSE)
+IntegrateData <- RunPCA(IntegrateData, verbose = FALSE,npcs = 50)
+ElbowPlot(IntegrateData,ndims = 50)   
+### visulization
+IntegrateData <- RunUMAP(IntegrateData,reduction = "pca", dims = 1:10)
+IntegrateData <- FindNeighbors(IntegrateData, reduction = "pca", dims = 1:10)
+IntegrateData <- FindClusters(IntegrateData, resolution = 0.8)
+DimPlot(IntegrateData, reduction = "umap", label = T, group.by = "orig.ident",cols =colors.use,pt.size = 0.5)
+seurat_clusters
+DefaultAssay(IntegrateData) <- "integrated"
+DefaultAssay(IntegrateData) <- "RNA"
+FeaturePlot(IntegrateData, features = c("Dlk1"),pt.size = 0)
+#重命名cell type
+new.cluster.ids <- c("Myofibroblasts", "Myofibroblasts", "Intermediate fibroblasts", "Myofibroblasts", "Macrophages", "Intermediate fibroblasts", "Intermediate fibroblasts", "Myofibroblasts", "Macrophages","Macrophages","Myofibroblasts","Macrophages", "Macrophages","Mast cell", "Sherwan cells")
+names(new.cluster.ids) <- levels(IntegrateData)
+IntegrateData <- RenameIdents(IntegrateData, new.cluster.ids)
+DimPlot(IntegrateData, reduction = "umap", label = T, pt.size = 1,cols =colors.use)
+IntegrateData <- StashIdent(object = IntegrateData, save.name = 'cell_type')
+#featureplot
+FeaturePlot(IntegrateData, features = c("Dlk1"))
+#记录单细胞数目
+Single_cellname <- colnames(IntegrateData)
+saveRDS(IntegrateData,file = "/home/lab401_public/HTR/SD/IntegrateData.rds")
+saveRDS(Single_cellname,file = "/home/lab401_public/HTR/SD/Single_cellname.rds")
+#重新读取数据
+IF.data<- Read10X(data.dir = "/home/lab401_public/HTR/SD/outs_EB/filtered_feature_bc_matrix")
+MF.data<- Read10X(data.dir = "/home/lab401_public/HTR/SD/outs_SDSC/filtered_feature_bc_matrix")
+Mφ.data<- Read10X(data.dir = "/home/lab401_public/HTR/SD/outs_PGC/filtered_feature_bc_matrix")
+##加前缀
+colnames(IF.data) <- paste('IF.data',colnames(IF.data),sep = '_')
+colnames(MF.data) <- paste('MF.data',colnames(MF.data),sep = '_')
+colnames(Mφ.data) <- paste('Mφ.data',colnames(Mφ.data),sep = '_')
+## 构建seurat对象，并绘制小提琴图
+data.list <- list(MF.data,IF.data,Mφ.data)
+list.name <- c("MF.data","IF.data","Mφ.data")
+library(DoubletFinder)
+#去双滴前的预处理
+for(i in 1:length(data.list)){
+  data.list[[i]] <- data.list[[i]][,colnames(data.list[[i]]) %in% Single_cellname]#此步用于提取之前的去除双滴cluster细胞
+  data.list[[i]] <- CreateSeuratObject(counts = data.list[[i]], project = list.name[i], min.cells = 3, min.features = 200)
+  data.list[[i]][["percent.mt"]]<-PercentageFeatureSet(data.list[[i]],pattern = "^mt-")
+  data.list[[i]] <- NormalizeData(data.list[[i]], normalization.method = "LogNormalize", scale.factor = 10000)
+  data.list[[i]] <- FindVariableFeatures(data.list[[i]], selection.method = "vst", nfeatures = 2000) 
+  data.list[[i]]$group<-list.name[i]
+  data.list[[i]] <- ScaleData(data.list[[i]])
+  data.list[[i]] <- RunPCA(data.list[[i]])
+  data.list[[i]] <- RunUMAP(data.list[[i]], dims = 1:10)
+}
+sweep.res.list <- list()
+sweep.stats <- list()
+bcmvn <- list()
+max_pK <- list()
+for(i in 1:length(data.list)){
+  sweep.res.list[[i]] <- paramSweep_v3(data.list[[i]], PCs = 1:15, sct = FALSE)
+  sweep.stats[[i]] <- summarizeSweep(sweep.res.list[[i]], GT = FALSE)
+  bcmvn[[i]] <- find.pK(sweep.stats[[i]])
+  max_pK[[i]]<-as.numeric(as.vector(bcmvn[[i]]$pK[which.max(bcmvn[[i]]$BCmetric)]))
+}
+#分别计算三组双滴率
+DoubletRate = ncol(IF.data)*8*1e-6
+DoubletRate
+DoubletRate = ncol(MF.data)*8*1e-6
+DoubletRate
+DoubletRate = ncol(Mφ.data)*8*1e-6
+DoubletRate
+#双滴计算 DoubletRate = 0.032
+percent <- c(0.032,0.032,0.032)## 双滴比例
+for(i in 1:length(data.list)){
+  nExp_poi <- round(percent[i]*ncol(data.list[[i]]))  
+  data.list[[i]] <- doubletFinder_v3(seu = data.list[[i]], PCs = 1:15, pN = 0.25, pK = max_pK[[i]], 
+                                     nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)}
+
+
+
+#去除多余meta.data信息，将双滴分组统一命名为“doublet”
+for(i in 1:length(data.list)){
+  data.list[[i]]$doublet <- data.list[[i]]@meta.data[,7]
+  data.list[[i]]@meta.data <- data.list[[i]]@meta.data[,-6:-7]
+}
+#将doublet信息整合，再去双滴前的UMAP图中查看效果
+doublet <- vector(mode = "character",length = 0)
+for(i in 1:length(data.list)){
+  doublet <- c(doublet,data.list[[i]]$doublet)
+}
+table(doublet)
+IntegrateData <- AddMetaData(IntegrateData,metadata = doublet,col.name = "doublet")
+DimPlot(IntegrateData,group.by = "doublet")
+Idents(IntegrateData) <- "doublet"
+#提取单个细胞
+IntegrateData <- subset(IntegrateData,idents = "Singlet")
+
+DimPlot(IntegrateData,group.by = "orig.ident",label = T,cols =colors.use)+ NoLegend()
+#重命名cell type
+new.cluster.ids <- c("Myofibroblasts", "Myofibroblasts", "Intermediate fibroblasts", "Myofibroblasts", "Macrophages", "Intermediate fibroblasts", "Intermediate fibroblasts", "Myofibroblasts", "Macrophages","Macrophages","Myofibroblasts","Macrophages", "Macrophages","Mast cell", "Sherwan cells")
+names(new.cluster.ids) <- levels(IntegrateData)
+IntegrateData <- RenameIdents(IntegrateData, new.cluster.ids)
+DimPlot(IntegrateData, reduction = "umap", label = T, pt.size = 1,cols =colors.use)
+IntegrateData <- StashIdent(object = IntegrateData, save.name = 'cell_type')
+
+
+
+
+
+#dim展示
+DimPlot(IntegrateData,group.by = "orig.ident",label = T,cols =colors.use)+ NoLegend()
+DimPlot(IntegrateData,group.by = "seurat_clusters",label = F,cols =colors.use,pt.size = 1)
+
+#画框
+FeaturePlot(IntegrateData,features = c("Rac2","Fcgr2b","Syk","Lyn"),cols = c("lightgrey" ,"#DE1F1F"),pt.size = 0)+annotate(geom = 'segment', y = Inf, yend = Inf, color = 'black', x = -Inf, xend = Inf, size = 1)+annotate(geom = 'segment', x = Inf, xend = Inf, color = 'black', y = -Inf, yend = Inf, size = 1) 
+#高变基因
+mycolor <- c('lightgrey', 'blue','seagreen2')#设置颜色  
+FeaturePlot(IntegrateData, features = 'Acta2',cols = mycolor, pt.size = 0.5)+    theme(panel.border = element_rect(fill=NA,color="black", size=1, linetype="solid"))
+
+#cluster颜色
+colors.use=c(c("#E4C755","#53A85F", "#968175", "#F3B1A0","#D6E7A3","#57C3F3", "#AA9A59", "#E95C59","#E59CC4","#AB3282", "#23452F", "#6778AE","#8C549C","#585658", "#9FA3A8", "#E0D4CA", "#5F3D69", "#C5DEBA", "#58A4C3"))
+DimPlot(IntegrateData, reduction = "umap", label = F, group.by = "seurat_clusters",cols =colors.use,pt.size = 0)+ NoLegend()+annotate(geom = 'segment', y = Inf, yend = Inf, color = 'black', x = -Inf, xend = Inf, size = 1)+annotate(geom = 'segment', x = Inf, xend = Inf, color = 'black', y = -Inf, yend = Inf, size = 0.5)
+DimPlot(IntegrateData, reduction = "umap", label = F, group.by = "seurat_clusters",cols =colors.use,pt.size = 0)
+#分组颜色
+teamcolor=c("#9932CC","#F5DEB3", "#308014")
+DimPlot(IntegrateData, reduction = "umap", label = F, group.by = "orig.ident",cols =teamcolor,pt.size = 0)+ NoLegend()+annotate(geom = 'segment', y = Inf, yend = Inf, color = 'black', x = -Inf, xend = Inf, size = 1)+annotate(geom = 'segment', x = Inf, xend = Inf, color = 'black', y = -Inf, yend = Inf, size = 0.5)
+DimPlot(IntegrateData, reduction = "umap", label = F, group.by = "orig.ident",cols =teamcolor,pt.size = 0)
+#鉴定颜色
+colors.use=c("#4B0082","#FF8000", "#A066D3", "#DB2417","#4169E1")#cluture3 cell type
+DimPlot(IntegrateData, reduction = "umap", label = F, group.by = "cell_type",cols =colors.use,pt.size = 0)+ NoLegend()+annotate(geom = 'segment', y = Inf, yend = Inf, color = 'black', x = -Inf, xend = Inf, size = 1)+annotate(geom = 'segment', x = Inf, xend = Inf, color = 'black', y = -Inf, yend = Inf, size = 0.5)
+DimPlot(IntegrateData, reduction = "umap", label = F, group.by = "cell_type",cols =colors.use,pt.size = 0)
+#气泡图
+DotPlot(IntegrateData, features = "Col1a2","Col3a1","Acta2","Tagln","Dlk1","Pdgfra","Csf1r","Cd14","Cd68","Ccr2","Cpa3","Cma1","S100b","Sox10")+coord_flip()+theme_bw()+theme(panel.grid = element_blank(), axis.text.x=element_text(angle=90,hjust = 1,vjust=0.5))+scale_color_gradientn(values = seq(0,1,0.2),ccolours = c('#330066','#336699','#66CC66','#FFCC33')) + labs(x=NULL,y=NULL)+guides(size=guide_legend(order=3))
